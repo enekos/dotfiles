@@ -368,3 +368,6 @@ fi
 
 # Initialize starship prompt
 eval "$(starship init zsh)"
+
+# Ripgrep Configuration Path
+export RIPGREP_CONFIG_PATH="$HOME/.ripgreprc"
