@@ -1,0 +1,35 @@
+# ==========================================
+#  BREWFILE: macOS Package Management
+# ==========================================
+# Run `brew bundle` to install all dependencies
+# Run `brew bundle dump -f` to update this file
+
+# Ensure Homebrew is updated
+# tap "homebrew/core"
+# tap "homebrew/cask"
+# tap "homebrew/cask-fonts"
+
+# --- CLI Tools (The Core Stack) ---
+brew "stow"       # Dotfile manager
+brew "starship"   # Cross-shell prompt
+brew "fzf"        # Fuzzy finder
+brew "eza"        # Modern ls replacement
+brew "bat"        # Modern cat replacement
+brew "fd"         # Modern find replacement
+brew "ripgrep"    # Modern grep replacement
+brew "git-delta"  # Syntax-highlighting pager for git
+brew "zoxide"     # Smarter cd command
+brew "neovim"     # Text editor
+brew "tmux"       # Terminal multiplexer
+
+# --- Development & System Utilities ---
+brew "wget"
+brew "curl"
+brew "gh"         # GitHub CLI
+brew "jq"         # JSON processor
+
+# --- Fonts ---
+# Essential for Starship prompt and Neovim icons
+cask "font-hack-nerd-font"
+cask "font-fira-code-nerd-font"
+cask "font-meslo-lg-nerd-font"

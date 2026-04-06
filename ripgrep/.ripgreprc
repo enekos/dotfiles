@@ -1,0 +1,33 @@
+# ==========================================
+#  RIPGREP CONFIGURATION
+# ==========================================
+
+# Search hidden files and directories (by default ripgrep doesn't)
+--hidden
+
+# But still ignore the .git directory
+--glob=!.git/
+
+# Smart case: case-insensitive if search is all lowercase,
+# case-sensitive if it contains uppercase letters.
+--smart-case
+
+# Follow symlinks
+--follow
+
+# Set colors
+# Match: red, bold
+--colors=match:fg:red
+--colors=match:style:bold
+# Line numbers: yellow
+--colors=line:fg:yellow
+# Path: cyan
+--colors=path:fg:cyan
+
+# Ignore common build/cache directories
+--glob=!node_modules/
+--glob=!.cache/
+--glob=!target/
+--glob=!build/
+--glob=!dist/
+--glob=!.next/

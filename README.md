@@ -11,8 +11,10 @@ My personal dotfiles for macOS, managed cleanly with GNU Stow. This setup is hea
   - `eza` as a modern replacement for `ls`.
   - `bat` as a syntax-highlighting replacement for `cat`.
   - `fd` as a faster, friendlier `find`.
+  - `ripgrep` as an incredibly fast replacement for `grep`.
   - `zoxide` for smarter directory navigation.
 - **Git:** Configured with [git-delta](https://github.com/dandavison/delta) for syntax-highlighted, side-by-side diffs, plus a global `.gitignore`.
+- **Tmux:** Well-documented, customized configuration with `Ctrl-a` prefix, vim-bindings, and sensible split shortcuts.
 - **Editor:** Neovim configured via [LazyVim](https://www.lazyvim.org/).
 
 ---
@@ -22,9 +24,14 @@ My personal dotfiles for macOS, managed cleanly with GNU Stow. This setup is hea
 ### 1. Prerequisites
 Ensure you have [Homebrew](https://brew.sh/) installed on your Mac.
 
-Install the required packages:
+If you don't want to install dependencies manually, you can use the included `Brewfile`:
 ```bash
-brew install stow starship fzf eza bat fd git-delta zoxide
+brew bundle --file=~/dotfiles/brew/Brewfile
+```
+
+Or install the core packages manually:
+```bash
+brew install stow starship fzf eza bat fd ripgrep git-delta zoxide neovim tmux
 ```
 
 ### 2. Clone the Repository
@@ -58,6 +65,8 @@ Use GNU Stow to symlink the configurations into your home directory. Run this fr
 stow zsh
 stow git
 stow nvim
+stow tmux
+stow ripgrep
 ```
 
 To install everything at once:
@@ -99,12 +108,18 @@ stow -D zsh
 ## 📁 Repository Structure
 ```text
 ~/dotfiles
+├── brew/
+│   └── Brewfile         # Homebrew declarative package list
 ├── git/
 │   ├── .gitconfig
 │   └── .gitignore_global
 ├── nvim/
 │   └── .config/
 │       └── nvim/        # LazyVim setup
+├── ripgrep/
+│   └── .ripgreprc       # Ripgrep smart case and ignore config
+├── tmux/
+│   └── .tmux.conf       # Tmux configuration and shortcuts
 └── zsh/
     └── .zshrc
 ```
