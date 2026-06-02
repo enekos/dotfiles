@@ -67,7 +67,10 @@ stow git
 stow nvim
 stow tmux
 stow ripgrep
+stow iterm2
 ```
+
+After `stow iterm2`, run `./iterm2/install.sh` (with iTerm2 closed) to apply the "Evangelion Dark" preset as the Default profile.
 
 To install everything at once:
 ```bash
@@ -116,6 +119,10 @@ stow -D zsh
 ├── nvim/
 │   └── .config/
 │       └── nvim/        # LazyVim setup
+├── iterm2/
+│   ├── install.sh       # Apply preset as Default profile (ignored by stow)
+│   └── Library/Application Support/iTerm2/ColorPresets/
+│       └── Evangelion Dark.itermcolors   # Matches Zed's Evangelion Dark theme
 ├── ripgrep/
 │   └── .ripgreprc       # Ripgrep smart case and ignore config
 ├── tmux/
