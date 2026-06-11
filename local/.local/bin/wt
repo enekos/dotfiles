@@ -1,0 +1,463 @@
+#!/usr/bin/env bash
+# wt — git worktree manager with per-worktree port + Postgres isolation.
+# Thin wrapper over `git worktree` that, for services with a declared profile,
+# allocates ports, creates an isolated DB, and writes managed .env.local
+# overrides so several branches can run dev servers concurrently.
+#
+# Service profiles (ports, DB var, install/migrate commands) are NOT baked in.
+# They live in the config file ($WT_CONFIG, default ~/.config/wt/config), which
+# stays on this machine and out of any committed dotfiles. Without a config wt
+# is a generic worktree manager: `git worktree add` + `pnpm install`.
+# Run `wt help` for the config format.
+
+set -euo pipefail
+
+# ─── config ────────────────────────────────────────────────────────────
+STATE_DIR="${WT_STATE_DIR:-$HOME/.config/wt}"
+STATE_FILE="$STATE_DIR/state.tsv"
+WT_CONFIG="${WT_CONFIG:-$STATE_DIR/config}"
+
+# Load local service profiles + path/default overrides, if present.
+# shellcheck source=/dev/null
+[[ -f "$WT_CONFIG" ]] && source "$WT_CONFIG"
+
+# Resolved after config so the config (or env) can set any of these.
+SRC_ROOT="${WT_SRC_ROOT:-$HOME/src}"          # root holding service repos
+WT_DIR="${WT_DIR:-$HOME/worktrees}"           # where worktrees are created
+DEFAULT_SERVICE="${WT_DEFAULT_SERVICE:-}"     # service used when -s is omitted
+WT_PROFILES="${WT_PROFILES:-}"                # space-separated services w/ setup
+
+# ─── plumbing ──────────────────────────────────────────────────────────
+die()  { echo "wt: $*" >&2; exit 1; }
+warn() { echo "wt: $*" >&2; }
+info() { echo "wt: $*" >&2; }   # diagnostics → stderr (never pollutes captures)
+
+sanitize_dir() {
+  # Branch name → directory-safe slug (preserve case, swap `/` for `_`)
+  printf '%s' "$1" | sed 's|/|_|g' | sed 's|[^A-Za-z0-9_.-]||g'
+}
+
+sanitize_db() {
+  # Branch → postgres-safe identifier (lowercase, underscore-only)
+  printf '%s' "$1" | sed 's|[^A-Za-z0-9_]|_|g' | tr 'A-Z' 'a-z'
+}
+
+ensure_state() {
+  mkdir -p "$STATE_DIR"
+  if [[ ! -f "$STATE_FILE" ]]; then
+    printf "# branch\tservice\toffset\tdb\tworktree_path\tcreated\n" > "$STATE_FILE"
+  fi
+}
+
+next_offset() {
+  ensure_state
+  local used i=1
+  used=$(awk -F'\t' '!/^#/ && NF>=3 {print $3}' "$STATE_FILE" | sort -n | tr '\n' ' ')
+  while echo " $used " | grep -q " $i "; do i=$((i+1)); done
+  echo "$i"
+}
+
+state_add() {
+  ensure_state
+  printf "%s\t%s\t%s\t%s\t%s\t%s\n" \
+    "$1" "$2" "$3" "$4" "$5" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$STATE_FILE"
+}
+
+state_remove() {
+  ensure_state
+  local tmp
+  tmp=$(mktemp)
+  awk -F'\t' -v b="$1" '/^#/ || $1 != b' "$STATE_FILE" > "$tmp"
+  mv "$tmp" "$STATE_FILE"
+}
+
+state_get() {
+  ensure_state
+  awk -F'\t' -v b="$1" '!/^#/ && $1 == b' "$STATE_FILE"
+}
+
+svc_root() { echo "$SRC_ROOT/$1"; }
+
+# ─── service profiles (config-driven) ───────────────────────────────────
+# A profile is a set of vars in $WT_CONFIG named WT_PROFILE_<svc>_<KEY>.
+# Recognized keys: PORTS ("VAR:BASE:STEP …"), DB_VAR, DB_PREFIX, INSTALL,
+# MIGRATE, DEV_HINT. See `wt help` for an example.
+
+svc_has_profile() {
+  local svc="$1" p
+  for p in $WT_PROFILES; do
+    [[ "$p" == "$svc" ]] && return 0
+  done
+  return 1
+}
+
+profile_get() {
+  # profile_get <service> <KEY> → value (empty if unset)
+  local svc key var
+  svc=$(printf '%s' "$1" | sed 's|[^A-Za-z0-9]|_|g')
+  key="$2"
+  var="WT_PROFILE_${svc}_${key}"
+  printf '%s' "${!var:-}"
+}
+
+# Runs a profile's setup against a fresh worktree. Sets REPLY_DB to the
+# created DB name (empty if the profile declares no DB).
+setup_profile() {
+  local svc="$1" wt_path="$2" branch="$3" offset="$4"
+  REPLY_DB=""
+
+  local ports db_var db_prefix install migrate
+  ports=$(profile_get "$svc" PORTS)
+  db_var=$(profile_get "$svc" DB_VAR)
+  db_prefix=$(profile_get "$svc" DB_PREFIX)
+  install=$(profile_get "$svc" INSTALL)
+  migrate=$(profile_get "$svc" MIGRATE)
+
+  # Build the managed env block: offset-derived ports, then the DB var.
+  local managed="" spec var base step val db_name=""
+  for spec in $ports; do
+    IFS=: read -r var base step <<< "$spec"
+    step="${step:-10}"
+    val=$((base + offset * step))
+    managed+="$var=$val"$'\n'
+    info "$svc: $var=$val"
+  done
+  if [[ -n "$db_var" ]]; then
+    db_name="${db_prefix}$(sanitize_db "$branch")"
+    managed+="$db_var=$db_name"$'\n'
+    info "$svc: $db_var=$db_name"
+  fi
+
+  # Copy source .env.local (user-specific creds) then append managed overrides.
+  # env-cmd takes last-wins, so our block wins.
+  if [[ -n "$managed" ]]; then
+    local src_env_local wt_env_local
+    src_env_local="$(svc_root "$svc")/.env.local"
+    wt_env_local="$wt_path/.env.local"
+    if [[ -f "$src_env_local" ]]; then
+      cp "$src_env_local" "$wt_env_local"
+    else
+      : > "$wt_env_local"
+    fi
+    {
+      printf '\n# === wt managed: do not edit between these markers ===\n'
+      printf '# branch=%s offset=%s\n' "$branch" "$offset"
+      printf '%s' "$managed"
+      printf '# === end wt managed ===\n'
+    } >> "$wt_env_local"
+  fi
+
+  if [[ -n "$db_name" ]]; then
+    if command -v createdb >/dev/null 2>&1; then
+      if psql -lqt 2>/dev/null | cut -d'|' -f1 | tr -d ' ' | grep -qx "$db_name"; then
+        info "db $db_name already exists, skipping createdb"
+      else
+        info "createdb $db_name"
+        createdb "$db_name" || warn "createdb failed — create it manually"
+      fi
+    else
+      warn "createdb not in PATH — create db manually: createdb $db_name"
+    fi
+  fi
+
+  if [[ -n "$install" ]]; then
+    info "$install"
+    ( cd "$wt_path" && eval "$install" ) || warn "install failed"
+  fi
+  if [[ -n "$migrate" ]]; then
+    info "$migrate"
+    ( cd "$wt_path" && eval "$migrate" ) || warn "migrate failed — run manually later"
+  fi
+
+  REPLY_DB="$db_name"
+}
+
+teardown_profile() {
+  local svc="$1" branch="$2" db_name="$3"
+  [[ -z "$db_name" ]] && return
+  if command -v dropdb >/dev/null 2>&1; then
+    info "dropdb $db_name"
+    dropdb --if-exists "$db_name" || warn "dropdb failed"
+  fi
+}
+
+# ─── generic service setup (no profile) ─────────────────────────────────
+setup_generic() {
+  local wt_path="$1"
+  REPLY_DB=""
+  if [[ -f "$wt_path/package.json" ]] && command -v pnpm >/dev/null 2>&1; then
+    info "pnpm install"
+    ( cd "$wt_path" && pnpm install --prefer-offline ) || warn "pnpm install failed"
+  fi
+}
+
+# ─── subcommands ───────────────────────────────────────────────────────
+cmd_new() {
+  local branch="" from="main" svc="" no_setup=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --from)         from="$2"; shift 2;;
+      -s|--service)   svc="$2";  shift 2;;
+      --no-setup)     no_setup=1; shift;;
+      -h|--help)      echo "usage: wt new <branch> [--from main] [-s <service>] [--no-setup]"; return;;
+      -*)             die "unknown flag: $1";;
+      *)              branch="$1"; shift;;
+    esac
+  done
+
+  [[ -n "$branch" ]] || die "usage: wt new <branch> [--from main] [-s <service>]"
+  svc="${svc:-$DEFAULT_SERVICE}"
+  [[ -n "$svc" ]] || die "no service given and no WT_DEFAULT_SERVICE set (use -s <service>)"
+  local src
+  src=$(svc_root "$svc")
+  [[ -d "$src/.git" ]] || die "$src is not a git repo (try -s <service>)"
+
+  local dir_slug wt_path
+  dir_slug=$(sanitize_dir "$branch")
+  wt_path="$WT_DIR/$svc/$dir_slug"
+  [[ ! -d "$wt_path" ]] || die "worktree already exists: $wt_path"
+
+  local offset
+  offset=$(next_offset)
+
+  info "worktree: $svc/$branch → $wt_path  (from $from, offset $offset)"
+  mkdir -p "$WT_DIR/$svc"
+  ( cd "$src" && git fetch origin "$from" --quiet 2>/dev/null ) \
+    || warn "fetch failed, falling back to local $from"
+
+  # Decide how to attach: existing local branch, remote-only branch, or fresh.
+  if (cd "$src" && git show-ref --verify --quiet "refs/heads/$branch"); then
+    info "branch exists locally — attaching"
+    ( cd "$src" && git worktree add "$wt_path" "$branch" ) || die "git worktree add failed"
+  elif (cd "$src" && git show-ref --verify --quiet "refs/remotes/origin/$branch"); then
+    info "branch exists on remote — checking out tracking branch"
+    ( cd "$src" && git worktree add -b "$branch" "$wt_path" "origin/$branch" ) \
+      || die "git worktree add failed"
+  else
+    local base="$from"
+    (cd "$src" && git show-ref --verify --quiet "refs/remotes/origin/$from") && base="origin/$from"
+    info "creating new branch '$branch' from $base"
+    ( cd "$src" && git worktree add -b "$branch" "$wt_path" "$base" ) \
+      || die "git worktree add failed"
+  fi
+
+  REPLY_DB=""
+  if [[ $no_setup -eq 0 ]]; then
+    if svc_has_profile "$svc"; then
+      setup_profile "$svc" "$wt_path" "$branch" "$offset"
+    else
+      setup_generic "$wt_path"
+    fi
+  fi
+  local db="$REPLY_DB"
+
+  state_add "$branch" "$svc" "$offset" "$db" "$wt_path"
+
+  echo
+  info "ready"
+  echo "  cd $wt_path"
+  local dev_hint
+  dev_hint=$(profile_get "$svc" DEV_HINT)
+  [[ -n "$dev_hint" ]] && echo "  $dev_hint   # uses .env.local with worktree-specific ports/db"
+}
+
+cmd_ls() {
+  ensure_state
+  if [[ $(wc -l < "$STATE_FILE") -le 1 ]]; then
+    info "no worktrees yet — wt new <branch>"
+    return
+  fi
+  printf "%-30s %-8s %-7s %-30s %s\n" "BRANCH" "SVC" "OFFSET" "DB" "PATH"
+  awk -F'\t' '!/^#/ && NF>=5 {printf "%-30s %-8s %-7s %-30s %s\n", $1, $2, $3, $4, $5}' "$STATE_FILE"
+}
+
+cmd_rm() {
+  local branch="" force=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -f|--force) force=1; shift;;
+      -h|--help)  echo "usage: wt rm <branch> [--force]"; return;;
+      -*)         die "unknown flag: $1";;
+      *)          branch="$1"; shift;;
+    esac
+  done
+  [[ -n "$branch" ]] || die "usage: wt rm <branch> [--force]"
+
+  local line
+  line=$(state_get "$branch")
+  [[ -n "$line" ]] || die "no wt-managed worktree for '$branch' (see: wt ls)"
+
+  local svc db wt_path
+  svc=$(echo     "$line" | awk -F'\t' '{print $2}')
+  db=$(echo      "$line" | awk -F'\t' '{print $4}')
+  wt_path=$(echo "$line" | awk -F'\t' '{print $5}')
+
+  if [[ -d "$wt_path" && $force -eq 0 ]]; then
+    if [[ -n "$(cd "$wt_path" && git status --porcelain 2>/dev/null)" ]]; then
+      die "worktree has uncommitted changes; commit/stash or pass --force"
+    fi
+  fi
+
+  local src remove_args=()
+  src=$(svc_root "$svc")
+  [[ $force -eq 1 ]] && remove_args+=(--force)
+  ( cd "$src" && git worktree remove "${remove_args[@]}" "$wt_path" ) \
+    || warn "git worktree remove failed (path may already be gone)"
+
+  if svc_has_profile "$svc"; then
+    teardown_profile "$svc" "$branch" "$db"
+  fi
+
+  state_remove "$branch"
+  info "removed worktree for $branch"
+  info "branch '$branch' retained — drop with: git -C $src branch -D $branch"
+}
+
+cmd_path() {
+  local branch="${1:-}"
+  if [[ -z "$branch" ]]; then
+    pwd -P
+    return
+  fi
+  local line
+  line=$(state_get "$branch")
+  [[ -n "$line" ]] || die "no wt-managed worktree for '$branch'"
+  echo "$line" | awk -F'\t' '{print $5}'
+}
+
+cmd_pr() {
+  local create=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --create|-c) create=1; shift;;
+      *)           shift;;
+    esac
+  done
+  command -v gh >/dev/null 2>&1 || die "gh CLI required (brew install gh)"
+  if [[ $create -eq 1 ]]; then
+    gh pr create --web
+  else
+    gh pr view --web 2>/dev/null || {
+      info "no PR yet — opening creator"
+      gh pr create --web
+    }
+  fi
+}
+
+cmd_sync() {
+  local target="${1:-main}"
+  [[ -e ".git" ]] || die "not in a git worktree"
+  if [[ -n "$(git status --porcelain)" ]]; then
+    die "uncommitted changes; commit or stash first"
+  fi
+  info "fetching origin/$target"
+  git fetch origin "$target"
+  info "rebasing onto origin/$target"
+  git rebase "origin/$target"
+}
+
+cmd_doctor() {
+  local ok=0 fail=0
+  check() {
+    if eval "$2" >/dev/null 2>&1; then
+      printf "  ok    %s\n" "$1"; ok=$((ok+1))
+    else
+      printf "  FAIL  %s\n" "$1"; fail=$((fail+1))
+    fi
+  }
+  echo "wt doctor"
+  check "git in PATH"                   "command -v git"
+  check "gh in PATH"                    "command -v gh"
+  check "pnpm in PATH"                  "command -v pnpm"
+  check "psql in PATH"                  "command -v psql"
+  check "createdb in PATH"              "command -v createdb"
+  check "SRC_ROOT exists ($SRC_ROOT)"   "test -d '$SRC_ROOT'"
+  check "config present ($WT_CONFIG)"   "test -f '$WT_CONFIG'"
+  check "state dir writable"            "mkdir -p '$STATE_DIR' && test -w '$STATE_DIR'"
+  local p
+  for p in $WT_PROFILES; do
+    check "repo for '$p' at $(svc_root "$p")" "test -d '$(svc_root "$p")/.git'"
+  done
+  echo
+  echo "  $ok ok, $fail fail"
+  [[ $fail -eq 0 ]]
+}
+
+cmd_help() {
+  cat <<EOF
+wt — git worktree manager with per-worktree port + DB isolation
+
+USAGE
+  wt new <branch> [--from main] [-s|--service <svc>] [--no-setup]
+    Create a worktree. For a service with a profile: allocates ports,
+    creates a DB, writes .env.local overrides, runs install + migrate.
+    For any other service: plain worktree + pnpm install.
+
+  wt ls                    List wt-managed worktrees.
+  wt rm <branch> [-f]      Remove worktree + drop DB. Refuses on dirty tree.
+  wt path [branch]         Print worktree path (no arg = cwd).
+  wt pr [--create]         Open the current branch's PR (or create it).
+  wt sync [target=main]    Rebase current worktree onto origin/<target>.
+  wt doctor                Check prerequisites.
+
+LAYOUT
+  worktrees:    \$WT_DIR/<svc>/<branch-slug>
+  state file:   $STATE_FILE
+  source repos: \$SRC_ROOT/<svc>
+
+CONFIG ($WT_CONFIG)
+  Service profiles and machine paths live here, sourced as shell. Keep it
+  out of any committed dotfiles. Example for a service named 'api':
+
+    WT_SRC_ROOT="\$HOME/src/monorepo"
+    WT_DIR="\$HOME/src/worktrees"
+    WT_DEFAULT_SERVICE="api"
+    WT_PROFILES="api"
+
+    # Profile for 'api' (keys: PORTS, DB_VAR, DB_PREFIX, INSTALL, MIGRATE,
+    # DEV_HINT). PORTS entries are VAR:BASE:STEP; the value written to
+    # .env.local is BASE + offset*STEP, so each worktree gets unique ports.
+    WT_PROFILE_api_PORTS="HTTP_PORT:3000:10"
+    WT_PROFILE_api_DB_VAR="DATABASE_NAME"
+    WT_PROFILE_api_DB_PREFIX="api_"
+    WT_PROFILE_api_INSTALL="pnpm install --prefer-offline"
+    WT_PROFILE_api_MIGRATE="pnpm db:migrate"
+    WT_PROFILE_api_DEV_HINT="pnpm dev:local"
+
+SHELL FUNCTION (paste into ~/.zshrc to enable \`wt cd <branch>\`)
+  wt() {
+    if [[ "\$1" == "cd" ]]; then
+      shift; cd "\$(command wt path "\$@")"
+    else
+      command wt "\$@"
+    fi
+  }
+
+ENV OVERRIDES (also settable in $WT_CONFIG)
+  WT_SRC_ROOT        root holding service repos   (default ~/src)
+  WT_DIR             where worktrees are created   (default ~/worktrees)
+  WT_STATE_DIR       state + config dir            (default ~/.config/wt)
+  WT_CONFIG          config file path              (default \$WT_STATE_DIR/config)
+  WT_DEFAULT_SERVICE service used when -s omitted
+  WT_PROFILES        space-separated services with a profile
+EOF
+}
+
+# ─── dispatch ──────────────────────────────────────────────────────────
+main() {
+  local cmd="${1:-help}"
+  [[ $# -gt 0 ]] && shift
+  case "$cmd" in
+    new)            cmd_new "$@";;
+    ls|list)        cmd_ls "$@";;
+    rm|remove)      cmd_rm "$@";;
+    path)           cmd_path "$@";;
+    pr)             cmd_pr "$@";;
+    sync)           cmd_sync "$@";;
+    doctor)         cmd_doctor "$@";;
+    help|-h|--help) cmd_help;;
+    *)              die "unknown command: $cmd (try: wt help)";;
+  esac
+}
+
+main "$@"

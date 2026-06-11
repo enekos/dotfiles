@@ -1,2 +1,5 @@
 .DS_Store
 .zsecrets
+
+# diff-preview deps — reinstall with: cd ~/.local/share/diff-preview && npm ci
+local/.local/share/diff-preview/node_modules

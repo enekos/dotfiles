@@ -68,9 +68,18 @@ stow nvim
 stow tmux
 stow ripgrep
 stow iterm2
+stow local
 ```
 
 After `stow iterm2`, run `./iterm2/install.sh` (with iTerm2 closed) to apply the "Evangelion Dark" preset as the Default profile.
+
+The `local` package symlinks two CLIs into `~/.local/bin`:
+
+- **`wt`** — git worktree manager with per-worktree port + Postgres isolation. Service profiles (ports, DB vars, install/migrate commands) are **not** committed; they live in `~/.config/wt/config` on each machine. Run `wt help` for the config format.
+- **`diff-preview`** — renders the current repo's diff as a dark-themed HTML page and opens it in the browser. Needs its deps (not committed):
+  ```bash
+  cd ~/.local/share/diff-preview && npm ci
+  ```
 
 To install everything at once:
 ```bash
