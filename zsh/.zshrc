@@ -154,22 +154,98 @@ export PATH="$BUN_INSTALL/bin:$PATH"
 export BUN_INSTALL="$HOME/.bun"
 export PATH="$BUN_INSTALL/bin:$PATH"
 
-
-
-# Your SSH Key Name or Fingerprint (as it appears in Hetzner Cloud)
-
-
-# (Optional) Inject LLM API keys for the AI workers
-
+# Production gcloud log helpers (jl/jle/jlf/jltrace/jlraw/jlfire) live OUTSIDE
+# this public repo — they carry the prod project id + service names.
+# File is in $HOME, not version-controlled. See ~/.gcloud-logs.zsh.
+[ -f ~/.gcloud-logs.zsh ] && source ~/.gcloud-logs.zsh
 
 # ==========================================
 # Power User Tools & Aliases
 # ==========================================
+# --- eza (modern ls) ---
 alias ls="eza --icons --git"
 alias ll="eza --icons --git -la"
+alias la="eza --icons --git -a"
+alias lt="eza --icons --git --tree --level=2"          # 2-level tree
+alias ltt="eza --icons --git --tree --level=4"         # deeper tree
+alias lg="eza --icons --git -la --git --sort=modified" # newest last, git status
+
+# --- bat (modern cat) ---
 alias cat="bat"
+alias catp="bat -pp"                                    # plain, no decorations/pager
+
+# --- fd / ripgrep (modern find/grep) ---
+alias ff="fd --hidden --follow"                         # find files
+alias rgi="rg -i"                                       # case-insensitive search
+
+# --- neovim ---
+alias v="nvim"
+alias vi="nvim"
+alias vim="nvim"
+
+# --- git (delta-aware shortcuts on top of the git plugin) ---
+alias gs="git status -sb"
+alias ga="git add"
+alias gaa="git add -A"
+alias gl="git log --oneline --graph --decorate -20"
+alias gla="git log --oneline --graph --decorate --all -30"
+alias gsw="git switch"
+alias gst="git stash"
+alias gstp="git stash pop"
+alias gundo="git reset --soft HEAD~1"                   # uncommit, keep changes
+alias gwip='git add -A && git commit -m "wip" --no-verify'
+
+# --- GitHub CLI ---
+alias ghpr="gh pr create --fill"
+alias ghprv="gh pr view --web"
+alias ghco="gh pr checkout"
+alias ghs="gh pr status"
+
+# --- tmux ---
+alias ta="tmux attach -t"
+alias tn="tmux new -s"
+alias tl="tmux ls"
+alias tk="tmux kill-session -t"
+
+# --- package managers / runtimes ---
+alias p="pnpm"
+alias pi="pnpm install"
+alias pd="pnpm dev"
+alias bx="bunx"
+alias uvr="uv run"
+
+# --- docker ---
+alias ldr="lazydocker"
+
+# --- misc tooling ---
 alias mairu="/Users/enekosarasola/mairu/mairu/bin/mairu"
 alias lot="/Users/enekosarasola/eneko_projects/lotura/lotura -dir /Users/enekosarasola/thinking-os"
+alias reload="exec zsh"                                 # reload shell
+alias path='echo $PATH | tr ":" "\n"'                   # readable $PATH
+
+# --- fzf-powered helpers ---
+# fcd: fuzzy-cd into any subdirectory (uses fd + fzf + zoxide)
+fcd() {
+  local dir
+  dir=$(fd --type d --hidden --follow --exclude .git | fzf +m) && cd "$dir"
+}
+# fco: fuzzy git branch checkout (local + remote)
+fco() {
+  local branch
+  branch=$(git branch --all | grep -v HEAD | sed 's/.* //; s#remotes/[^/]*/##' \
+    | sort -u | fzf +m) && git switch "$branch" 2>/dev/null || git switch -c "$branch"
+}
+# fkill: fuzzy-pick a process and kill it
+fkill() {
+  local pid
+  pid=$(ps -ef | sed 1d | fzf -m | awk '{print $2}') && echo "$pid" | xargs kill -"${1:-9}"
+}
+# fh: fuzzy-search shell history and run the selection
+fh() {
+  local cmd
+  cmd=$(fc -rl 1 | fzf +s --tac | sed -E 's/ *[0-9]+\*? +//') && print -z "$cmd"
+}
+
 eval "$(zoxide init zsh)"
 
 # Setup fzf shell integration
