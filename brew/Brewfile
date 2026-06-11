@@ -8,6 +8,7 @@
 # tap "homebrew/core"
 # tap "homebrew/cask"
 # tap "homebrew/cask-fonts"
+tap "sidequery/tap"  # mdnb (Markdown notebook)
 
 # --- CLI Tools (The Core Stack) ---
 brew "stow"       # Dotfile manager
@@ -27,6 +28,9 @@ brew "wget"
 brew "curl"
 brew "gh"         # GitHub CLI
 brew "jq"         # JSON processor
+
+# --- Apps ---
+cask "mdnb"       # Local-first Markdown notebook (configured in ../mdnb/)
 
 # --- Fonts ---
 # Essential for Starship prompt and Neovim icons

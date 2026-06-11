@@ -1,0 +1,18 @@
+{
+  "id": "8B5CF6E2-0D0D-4D18-A78B-FA39FF140000",
+  "name": "Evangelion Dark",
+  "isDark": true,
+  "palette": {
+    "backgroundColor": "#0d0d18",
+    "textColor": "#e2e2f0",
+    "headingColor": "#c084fc",
+    "syntaxColor": "#a78bfa",
+    "codeColor": "#39ff14",
+    "codeBlockBackground": "#12121f",
+    "linkColor": "#8b5cf6",
+    "blockquoteColor": "#8b8ba0",
+    "accentColor": "#a78bfa",
+    "selectionColor": "#2d1a4a",
+    "codeHighlighterTheme": "rosePine"
+  }
+}

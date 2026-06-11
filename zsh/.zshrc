@@ -1,6 +1,9 @@
 # If you come from bash you might have to change your $PATH.
 # export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$PATH
 
+# Put rustup before homebrew
+export PATH="$HOME/.cargo/bin:$PATH"
+
 # Path to your Oh My Zsh installation.
 export ZSH="$HOME/.oh-my-zsh"
 
@@ -38,7 +41,7 @@ ZSH_THEME="lambda"
 # DISABLE_LS_COLORS="true"
 
 # Uncomment the following line to disable auto-setting terminal title.
-# DISABLE_AUTO_TITLE="true"
+DISABLE_AUTO_TITLE="true"
 
 # Uncomment the following line to enable command auto-correction.
 # ENABLE_CORRECTION="true"
@@ -165,6 +168,9 @@ export PATH="$BUN_INSTALL/bin:$PATH"
 alias ls="eza --icons --git"
 alias ll="eza --icons --git -la"
 alias cat="bat"
+alias mairu="/Users/enekosarasola/mairu/mairu/bin/mairu"
+alias lot="/Users/enekosarasola/eneko_projects/lotura/lotura -dir /Users/enekosarasola/thinking-os"
+eval "$(zoxide init zsh)"
 
 # Setup fzf shell integration
 source <(fzf --zsh)
@@ -179,3 +185,10 @@ eval "$(starship init zsh)"
 
 # Ripgrep Configuration Path
 export RIPGREP_CONFIG_PATH="$HOME/.ripgreprc"
+export ONNX_PATH=/opt/homebrew/opt/onnxruntime/lib/libonnxruntime.dylib
+
+# Pi
+export PATH="/Users/enekosarasola/.local/share/fnm/node-versions/v25.8.1/installation/bin:$PATH"
+
+test -e "${HOME}/.iterm2_shell_integration.zsh" && source "${HOME}/.iterm2_shell_integration.zsh" || true
+
