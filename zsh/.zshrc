@@ -247,6 +247,10 @@ fh() {
 }
 
 eval "$(zoxide init zsh)"
+# zz ships its own completion (_zz on $fpath, via ~/.oh-my-zsh/custom/completions);
+# it completes dirs + @branch + -w branches + flags. Don't rebind zz to zoxide's
+# dir-only completer here, or it overrides _zz.
+
 
 # Setup fzf shell integration
 source <(fzf --zsh)
@@ -267,4 +271,3 @@ export ONNX_PATH=/opt/homebrew/opt/onnxruntime/lib/libonnxruntime.dylib
 export PATH="/Users/enekosarasola/.local/share/fnm/node-versions/v25.8.1/installation/bin:$PATH"
 
 test -e "${HOME}/.iterm2_shell_integration.zsh" && source "${HOME}/.iterm2_shell_integration.zsh" || true
-
