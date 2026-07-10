@@ -4,78 +4,51 @@
 # Put rustup before homebrew
 export PATH="$HOME/.cargo/bin:$PATH"
 
-# Path to your Oh My Zsh installation.
-export ZSH="$HOME/.oh-my-zsh"
+# ==========================================
+# Completion + history (formerly provided by oh-my-zsh)
+# ==========================================
+# Brew site-functions (_git, etc.) + zz's _zz completion, then init compinit.
+fpath=(/opt/homebrew/share/zsh/site-functions ~/.zsh/completions $fpath)
+# compinit's security audit + dump rebuild costs ~220ms. Do the full pass only
+# once every 24h (when the dump is stale); use the cached dump (-C) otherwise.
+autoload -Uz compinit
+_zdump="${ZDOTDIR:-$HOME}/.zcompdump"
+if [[ -n "$_zdump"(#qN.mh+24) ]]; then
+  compinit -d "$_zdump"        # stale (>24h): re-audit + rebuild the dump
+else
+  compinit -C -d "$_zdump"     # fresh: trust the dump, skip the slow audit
+fi
+# Wordcode-compile the dump in the background so the next shell loads it faster.
+{ [[ ! -s "$_zdump.zwc" || "$_zdump" -nt "$_zdump.zwc" ]] && zcompile -R -- "$_zdump" } &!
+unset _zdump
 
-# Set name of the theme to load --- if set to "random", it will
-# load a random theme each time Oh My Zsh is loaded, in which case,
-# to know which specific one was loaded, run: echo $RANDOM_THEME
-# See https://github.com/ohmyzsh/ohmyzsh/wiki/Themes
-ZSH_THEME="lambda"
+# --- cached tool init ────────────────────────────────────────────────────────
+# fnm/zoxide/fzf/starship all just PRINT static shell code; spawning them on
+# every startup is the main cold-start cost. Cache each tool's output (compiled
+# to .zwc) and rebuild only when the tool binary — or this rc — is newer.
+# 4 subprocess forks per shell → 4 fast `source`s. To force a refresh after a
+# manual tweak: `rm -rf ~/.cache/zsh-init`.
+_evalcache() {
+  # NB: do NOT `emulate -L zsh` here — that makes setopt local to this function,
+  # which would revert the `setopt promptsubst` that starship's init runs while
+  # being sourced, leaving PROMPT showing a literal $(starship prompt …).
+  local name=$1; shift
+  local cache=${XDG_CACHE_HOME:-$HOME/.cache}/zsh-init/$name.zsh
+  if [[ ! -s $cache || $commands[$1] -nt $cache || ${${(%):-%N}:A} -nt $cache ]]; then
+    mkdir -p $cache:h
+    "$@" >| $cache 2>/dev/null
+    zcompile -R -- $cache 2>/dev/null
+  fi
+  source $cache
+}
 
-# Set list of themes to pick from when loading at random
-# Setting this variable when ZSH_THEME=random will cause zsh to load
-# a theme from this variable instead of looking in $ZSH/themes/
-# If set to an empty array, this variable will have no effect.
-# ZSH_THEME_RANDOM_CANDIDATES=( "robbyrussell" "agnoster" )
-
-# Uncomment the following line to use case-sensitive completion.
-# CASE_SENSITIVE="true"
-
-# Uncomment the following line to use hyphen-insensitive completion.
-# Case-sensitive completion must be off. _ and - will be interchangeable.
-# HYPHEN_INSENSITIVE="true"
-
-# Uncomment one of the following lines to change the auto-update behavior
-# zstyle ':omz:update' mode disabled  # disable automatic updates
-# zstyle ':omz:update' mode auto      # update automatically without asking
-# zstyle ':omz:update' mode reminder  # just remind me to update when it's time
-
-# Uncomment the following line to change how often to auto-update (in days).
-# zstyle ':omz:update' frequency 13
-
-# Uncomment the following line if pasting URLs and other text is messed up.
-# DISABLE_MAGIC_FUNCTIONS="true"
-
-# Uncomment the following line to disable colors in ls.
-# DISABLE_LS_COLORS="true"
-
-# Uncomment the following line to disable auto-setting terminal title.
-DISABLE_AUTO_TITLE="true"
-
-# Uncomment the following line to enable command auto-correction.
-# ENABLE_CORRECTION="true"
-
-# Uncomment the following line to display red dots whilst waiting for completion.
-# You can also set it to another string to have that shown instead of the default red dots.
-# e.g. COMPLETION_WAITING_DOTS="%F{yellow}waiting...%f"
-# Caution: this setting can cause issues with multiline prompts in zsh < 5.7.1 (see #5765)
-# COMPLETION_WAITING_DOTS="true"
-
-# Uncomment the following line if you want to disable marking untracked files
-# under VCS as dirty. This makes repository status check for large repositories
-# much, much faster.
-# DISABLE_UNTRACKED_FILES_DIRTY="true"
-
-# Uncomment the following line if you want to change the command execution time
-# stamp shown in the history command output.
-# You can set one of the optional three formats:
-# "mm/dd/yyyy"|"dd.mm.yyyy"|"yyyy-mm-dd"
-# or set a custom format using the strftime function format specifications,
-# see 'man strftime' for details.
-# HIST_STAMPS="mm/dd/yyyy"
-
-# Would you like to use another custom folder than $ZSH/custom?
-# ZSH_CUSTOM=/path/to/new-custom-folder
-
-# Which plugins would you like to load?
-# Standard plugins can be found in $ZSH/plugins/
-# Custom plugins may be added to $ZSH_CUSTOM/plugins/
-# Example format: plugins=(rails git textmate ruby lighthouse)
-# Add wisely, as too many plugins slow down shell startup.
-plugins=(git)
-
-source $ZSH/oh-my-zsh.sh
+# History — mirror oh-my-zsh's sensible defaults so ~/.zsh_history persists.
+HISTFILE="$HOME/.zsh_history"
+HISTSIZE=100000
+SAVEHIST=100000
+setopt SHARE_HISTORY HIST_IGNORE_ALL_DUPS HIST_IGNORE_SPACE \
+       HIST_REDUCE_BLANKS EXTENDED_HISTORY INC_APPEND_HISTORY
+setopt interactive_comments
 
 # User configuration
 
@@ -116,11 +89,7 @@ alias ldr="lazydocker"
 
 PATH="$HOME/.local/bin:$PATH"
 
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
-[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
-
-eval "$(fnm env --use-on-cd --shell zsh)"
+_evalcache fnm fnm env --use-on-cd --shell zsh
 export PATH="/opt/homebrew/opt/postgresql@17/bin:$PATH"
 export META_DIR="$HOME/src/meta"
 
@@ -246,14 +215,14 @@ fh() {
   cmd=$(fc -rl 1 | fzf +s --tac | sed -E 's/ *[0-9]+\*? +//') && print -z "$cmd"
 }
 
-eval "$(zoxide init zsh)"
-# zz ships its own completion (_zz on $fpath, via ~/.oh-my-zsh/custom/completions);
+_evalcache zoxide zoxide init zsh
+# zz ships its own completion (_zz on $fpath, via ~/.zsh/completions);
 # it completes dirs + @branch + -w branches + flags. Don't rebind zz to zoxide's
 # dir-only completer here, or it overrides _zz.
 
 
 # Setup fzf shell integration
-source <(fzf --zsh)
+_evalcache fzf fzf --zsh
 
 # Source secrets if they exist
 if [ -f ~/.zsecrets ]; then
@@ -261,7 +230,7 @@ if [ -f ~/.zsecrets ]; then
 fi
 
 # Initialize starship prompt
-eval "$(starship init zsh)"
+_evalcache starship starship init zsh
 
 # Ripgrep Configuration Path
 export RIPGREP_CONFIG_PATH="$HOME/.ripgreprc"
