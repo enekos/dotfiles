@@ -3,3 +3,8 @@
 
 # diff-preview deps — reinstall with: cd ~/.local/share/diff-preview && npm ci
 local/.local/share/diff-preview/node_modules
+
+# Compiled CLIs symlinked into ~/.local/bin — binaries, not source. Rebuild from
+# their own repos rather than tracking the artifacts here (zz: ~/eneko_projects/zz).
+local/.local/bin/aztarna
+local/.local/bin/zz

@@ -75,6 +75,7 @@ After `stow iterm2`, run `./iterm2/install.sh` (with iTerm2 closed) to apply the
 
 The `local` package symlinks two CLIs into `~/.local/bin`:
 
+- **`zz`** — zoxide-based command runner with optional git worktree jumping (e.g. `zz proj npm start` or `zz data@fix-foo pnpm test`). Source in `~/eneko_projects/zz`.
 - **`wt`** — git worktree manager with per-worktree port + Postgres isolation. Service profiles (ports, DB vars, install/migrate commands) are **not** committed; they live in `~/.config/wt/config` on each machine. Run `wt help` for the config format.
 - **`diff-preview`** — renders the current repo's diff as a dark-themed HTML page and opens it in the browser. Needs its deps (not committed):
   ```bash
