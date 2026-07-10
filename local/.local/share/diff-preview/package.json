@@ -1,6 +1,6 @@
 {
   "name": "diff-preview",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Standalone CLI: render the current repo's diff as a self-contained HTML page and open it in the browser. Port of leela's preview renderer.",
@@ -8,7 +8,9 @@
     "diff-preview": "./diff-preview.mjs"
   },
   "dependencies": {
-    "diff2html": "^3.4.56"
+    "diff2html": "^3.4.56",
+    "highlight.js": "^11.11.1",
+    "linkedom": "^0.18.12"
   },
   "engines": {
     "node": ">=20"

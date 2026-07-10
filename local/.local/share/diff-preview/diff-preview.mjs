@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // diff-preview — render the current repo's diff as a self-contained HTML page
-// and open it in the browser, using diff2html for the dark-themed layout.
+// and open it in the browser, using diff2html for the dark-themed layout with
+// server-side highlight.js syntax colouring (no client JS, CSP stays strict).
 
 import { spawnSync, spawn } from 'node:child_process'
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
@@ -11,9 +12,15 @@ import { createServer } from 'node:http'
 import { randomBytes, createHash } from 'node:crypto'
 
 import { html as diff2htmlHtml } from 'diff2html'
+import hljs from 'highlight.js'
+import { parseHTML } from 'linkedom'
+import { nodeStream, mergeStreams, closeTags, getLanguage } from 'diff2html/lib/ui/js/highlight.js-helpers.js'
 
 const require_ = createRequire(import.meta.url)
 const D2H_CSS = readFileSync(require_.resolve('diff2html/bundles/css/diff2html.min.css'), 'utf8')
+// highlight.js themes — dark is the page default, light overrides under prefers-color-scheme (matches the layout below).
+const HLJS_CSS_DARK = readFileSync(require_.resolve('highlight.js/styles/github-dark.min.css'), 'utf8')
+const HLJS_CSS_LIGHT = readFileSync(require_.resolve('highlight.js/styles/github.min.css'), 'utf8')
 
 // ────────────────────────── arg parsing ──────────────────────────
 
@@ -254,13 +261,50 @@ function escapeHtml(s) {
   return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
 }
 
+// Apply highlight.js syntax colouring to a diff2html line-by-line render, server-side,
+// so the output stays a fully static page (no client JS, CSP-friendly). Each file
+// wrapper carries data-lang; we colour every code line and merge the result back over
+// the original node stream so diff2html's intra-line <del>/<ins> word markers survive.
+function highlightDiff(diffHtmlStr) {
+  let document
+  try {
+    ;({ document } = parseHTML(`<!DOCTYPE html><html><body>${diffHtmlStr}</body></html>`))
+  } catch {
+    return diffHtmlStr // parsing failed — fall back to the un-highlighted render
+  }
+  for (const file of document.querySelectorAll('.d2h-file-wrapper')) {
+    const ext = file.getAttribute('data-lang')
+    let lang = ext ? getLanguage(ext) : 'plaintext'
+    if (hljs.getLanguage(lang) === undefined) lang = 'plaintext'
+    if (lang === 'plaintext') continue // nothing to colour; skip the work
+    for (const line of file.querySelectorAll('.d2h-code-line-ctn')) {
+      const text = line.textContent
+      if (!text) continue
+      try {
+        const result = closeTags(hljs.highlight(text, { language: lang, ignoreIllegals: true }))
+        const originalStream = nodeStream(line)
+        if (originalStream.length) {
+          const resultNode = document.createElement('div')
+          resultNode.innerHTML = result.value
+          result.value = mergeStreams(originalStream, nodeStream(resultNode), text)
+        }
+        line.classList.add('hljs')
+        line.innerHTML = result.value
+      } catch {
+        // leave this line as-is on any hljs/merge failure — never break the page
+      }
+    }
+  }
+  return document.querySelector('body').innerHTML
+}
+
 function renderHtml({ title, repo, baseBranch, agentBranch, files, dropped, stats, generatedAt }) {
   const patch = files.map(f => f.body).join('\n')
   const droppedList = dropped.length
     ? `<details class="dropped"><summary>${dropped.length} file(s) hidden (lockfiles / generated / vendored)</summary><ul>${dropped.map(p => `<li>${escapeHtml(p)}</li>`).join('')}</ul></details>`
     : ''
   const diffBody = files.length
-    ? diff2htmlHtml(patch, { outputFormat: 'line-by-line', drawFileList: true, matching: 'lines', colorScheme: 'auto' })
+    ? highlightDiff(diff2htmlHtml(patch, { outputFormat: 'line-by-line', drawFileList: true, matching: 'lines', colorScheme: 'auto' }))
     : '<div class="empty">No reviewable changes after filtering. The diff may be entirely generated / vendored content.</div>'
   return `<!DOCTYPE html>
 <html lang="en">
@@ -269,6 +313,14 @@ function renderHtml({ title, repo, baseBranch, agentBranch, files, dropped, stat
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)} · diff-preview</title>
 <style>${D2H_CSS}</style>
+<style>
+  /* highlight.js token colours — dark default, light under prefers-color-scheme (mirrors the layout vars) */
+  ${HLJS_CSS_DARK}
+  @media (prefers-color-scheme: light) { ${HLJS_CSS_LIGHT} }
+  /* the .hljs class sits on the inline code-line span; neutralise the theme's block/background defaults
+     so diff2html's add/del row tints and word markers still show through, keeping only token colours */
+  .d2h-code-line-ctn.hljs { background: transparent; color: inherit; padding: 0; display: inline; overflow: visible; }
+</style>
 <style>
   :root { --bg:#0d1117; --bg-elev:#161b22; --fg:#c9d1d9; --fg-mute:#8b949e; --border:#30363d; --add-fg:#56d364; --del-fg:#f85149; --link:#58a6ff; }
   @media (prefers-color-scheme: light) {
