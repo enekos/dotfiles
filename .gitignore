@@ -8,3 +8,14 @@ local/.local/share/diff-preview/node_modules
 # their own repos rather than tracking the artifacts here (zz: ~/eneko_projects/zz).
 local/.local/bin/aztarna
 local/.local/bin/zz
+
+# herdr runtime state — only config.toml is ours. On a machine that has no
+# ~/.config/herdr yet, stow symlinks the whole package dir instead of folding
+# into it, and herdr then writes all of this straight back into the repo.
+herdr/.config/herdr/session.json
+herdr/.config/herdr/plugins.json
+herdr/.config/herdr/.plugins.lock
+herdr/.config/herdr/release-notes.json
+herdr/.config/herdr/plugins/
+herdr/.config/herdr/*.log
+herdr/.config/herdr/*.sock
