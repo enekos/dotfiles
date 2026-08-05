@@ -15,6 +15,7 @@ My personal dotfiles for macOS, managed cleanly with GNU Stow. This setup is hea
   - `zoxide` for smarter directory navigation.
 - **Git:** Configured with [git-delta](https://github.com/dandavison/delta) for syntax-highlighted, side-by-side diffs, plus a global `.gitignore`.
 - **Tmux:** Well-documented, customized configuration with `Ctrl-a` prefix, vim-bindings, and sensible split shortcuts.
+- **Multiplexer:** [herdr](https://herdr.dev) with a `` Ctrl-` `` prefix, prefix-free `Ctrl-h/j/k/l` pane nav, and two fzf pickers bound over it — see [`herdr/README.md`](herdr/README.md).
 - **Editor:** Neovim configured via [LazyVim](https://www.lazyvim.org/).
 
 ---
@@ -66,12 +67,17 @@ stow zsh
 stow git
 stow nvim
 stow tmux
+stow herdr
 stow ripgrep
 stow iterm2
 stow local
 ```
 
 After `stow iterm2`, run `./iterm2/install.sh` (with iTerm2 closed) to apply the "Evangelion Dark" preset as the Default profile.
+
+After `stow herdr`, install the plugins its keymap binds to and reload — the
+plugin list itself is machine state and isn't committed. See
+[`herdr/README.md`](herdr/README.md) for the commands and the full keymap.
 
 The `local` package symlinks two CLIs into `~/.local/bin`:
 
@@ -126,6 +132,10 @@ stow -D zsh
 ├── git/
 │   ├── .gitconfig
 │   └── .gitignore_global
+├── herdr/
+│   ├── README.md         # Keymap rationale + plugin install commands
+│   └── .config/herdr/
+│       └── config.toml   # Prefix, pane nav, theme, plugin keybindings
 ├── nvim/
 │   └── .config/
 │       └── nvim/        # LazyVim setup

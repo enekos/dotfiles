@@ -1,0 +1,45 @@
+onboarding = false
+
+[theme]
+name = "rose-pine"
+auto_switch = false
+
+[keys]
+# Prefix key to enter prefix mode (default: "ctrl+b"). Swapped to ctrl+` since ctrl+b
+# collides with readline/shell muscle memory more than backtick does.
+prefix = "ctrl+backtick"
+
+# Direct pane navigation, no prefix — mirrors LazyVim/vim-tmux-navigator's <C-h/j/k/l> window nav.
+# Trade-off: these keys stop reaching the shell/agent in a focused pane (ctrl+l no longer
+# clears the terminal, ctrl+k no longer kills to end of line). Same trade vim-tmux-navigator
+# makes. Revert by deleting this block + `herdr server reload-config` if it bothers you.
+focus_pane_left = "ctrl+h"
+focus_pane_down = "ctrl+j"
+focus_pane_up = "ctrl+k"
+focus_pane_right = "ctrl+l"
+
+# Tab cycling ~ LazyVim's Shift-H / Shift-L buffer prev/next. Kept inside prefix mode since
+# a bare shift+letter can't be a direct binding — it would eat normal typed capital letters.
+previous_tab = "prefix+shift+h"
+next_tab = "prefix+shift+l"
+
+[[keys.command]]
+key = "prefix+backtick"
+type = "plugin_action"
+command = "jt.command-palette.open"
+description = "Command palette"
+
+[[keys.command]]
+key = "prefix+z"
+type = "plugin_action"
+command = "herdr-file-viewer.open-file-viewer"
+description = "Open file viewer (split)"
+
+[[keys.command]]
+key = "prefix+x"
+type = "plugin_action"
+command = "es.quick-actions.open"
+description = "Quick actions"
+
+[ui]
+show_agent_labels_on_pane_borders = true
