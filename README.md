@@ -17,6 +17,9 @@ My personal dotfiles for macOS, managed cleanly with GNU Stow. This setup is hea
 - **Tmux:** Well-documented, customized configuration with `Ctrl-a` prefix, vim-bindings, and sensible split shortcuts.
 - **Multiplexer:** [herdr](https://herdr.dev) with a `` Ctrl-` `` prefix, prefix-free `Ctrl-h/j/k/l` pane nav, and two fzf pickers bound over it — see [`herdr/README.md`](herdr/README.md).
 - **Editor:** Neovim configured via [LazyVim](https://www.lazyvim.org/).
+- **Agent guardrails:** [Claude Code](https://claude.com/claude-code) hooks that stop the
+  `cd x && y` anti-pattern, protect hand-written PR descriptions, and keep agents from
+  commenting on GitHub or Linear — see [`claude/README.md`](claude/README.md).
 
 ---
 
@@ -69,6 +72,7 @@ stow nvim
 stow tmux
 stow herdr
 stow ripgrep
+stow --adopt claude
 stow iterm2
 stow local
 ```
@@ -78,6 +82,12 @@ After `stow iterm2`, run `./iterm2/install.sh` (with iTerm2 closed) to apply the
 After `stow herdr`, install the plugins its keymap binds to and reload — the
 plugin list itself is machine state and isn't committed. See
 [`herdr/README.md`](herdr/README.md) for the commands and the full keymap.
+
+`claude` needs `--adopt` because `~/.claude/hooks/` normally already exists with
+files in it; check `git diff` afterwards in case adopt pulled a stale local copy
+over the repo's. The guards need `bun` on the machine. See
+[`claude/README.md`](claude/README.md) for what each one blocks and the
+`settings.json` snippet that wires them up.
 
 The `local` package symlinks two CLIs into `~/.local/bin`:
 
@@ -129,6 +139,9 @@ stow -D zsh
 ~/dotfiles
 ├── brew/
 │   └── Brewfile         # Homebrew declarative package list
+├── claude/
+│   ├── README.md         # What each hook blocks + settings.json wiring
+│   └── .claude/hooks/    # PreToolUse guards (bun) + iTerm2 tab title
 ├── git/
 │   ├── .gitconfig
 │   └── .gitignore_global
