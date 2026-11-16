@@ -8,6 +8,7 @@
 # AGENTLINE_PID   the agent process whose children are listed; otherwise the
 #                 nearest ancestor named claude, codex, opencode or odei
 # AGENTLINE_ROWS  1 to drop the process row, for hosts that only have one line
+# AGENTLINE_WIDTH visible columns the process row may use (default 128)
 export LC_NUMERIC=C
 input=$(cat)
 now=$(date +%s)
@@ -37,8 +38,8 @@ fmt_secs() {
 }
 
 # ── session processes: descendants of the agent, minus the statusline itself ──
-# first line "nproc cpu", then one "cpu<TAB>rss_kb<TAB>secs<TAB>label" row per process
-procs=$(ps -axo pid=,ppid=,pcpu=,rss=,etime=,args= | awk -v me=$$ -v agent="${AGENTLINE_PID:-}" '
+# first line "nproc cpu", then one "cpu<TAB>rss_kb<TAB>secs<TAB>pid<TAB>label" row per process
+procs=$(ps -axo pid=,ppid=,pcpu=,rss=,etime=,args= | awk -v me=$$ -v agent="${AGENTLINE_PID:-}" -v LABEL_MAX=26 '
   function secs(e,  d, n, f) {
     d = 0; if (index(e, "-")) { split(e, f, "-"); d = f[1]; e = f[2] }
     n = split(e, f, ":")
@@ -48,8 +49,10 @@ procs=$(ps -axo pid=,ppid=,pcpu=,rss=,etime=,args= | awk -v me=$$ -v agent="${AG
   {
     pid = $1; p[pid] = $2; cpu[pid] = $3; rss[pid] = $4; et[pid] = secs($5)
     c[pid] = base($6); lbl = c[pid]
-    for (i = 7; i <= NF; i++) if ($i !~ /^-/) { lbl = lbl " " base($i); break }
-    l[pid] = substr(lbl, 1, 22); kids[$2] = kids[$2] " " pid
+    # only real paths shrink to their basename; `s/a/b/g` stays readable
+    for (i = 7; i <= NF && length(lbl) <= LABEL_MAX; i++) lbl = lbl " " ($i ~ /^(\/|\.\.?\/|~\/)/ ? base($i) : $i)
+    l[pid] = length(lbl) > LABEL_MAX ? substr(lbl, 1, LABEL_MAX - 1) "…" : lbl
+    kids[$2] = kids[$2] " " pid
   }
   END {
     x = me; skip = me
@@ -63,7 +66,7 @@ procs=$(ps -axo pid=,ppid=,pcpu=,rss=,etime=,args= | awk -v me=$$ -v agent="${AG
         q[++t] = k; n++; s += cpu[k]
         # a shell that is only wrapping a child adds nothing to the detail row
         if (c[k] ~ /^-?(zsh|bash|sh)$/ && kids[k] != "") continue
-        rows = rows sprintf("%s\t%s\t%s\t%s\n", cpu[k], rss[k], et[k], l[k])
+        rows = rows sprintf("%s\t%s\t%s\t%s\t%s\n", cpu[k], rss[k], et[k], k, l[k])
       }
     }
     printf "%d %.0f\n%s", n, s, rows
@@ -155,26 +158,34 @@ add "$(limit wk "$week_pct" "$week_reset")"
 add "$load_str"
 add "$disk_str"
 add "$proc_str"
-# ── second row: one entry per session process, busiest first ──
+# ── second row: one roomy entry per session process, busiest first ──
 fmt_kb() { awk -v k="$1" 'BEGIN{ if (k >= 1048576) printf "%.1fG", k/1048576; else printf "%.0fM", k/1024 }'; }
 spin=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
 # fixed visible budget so the row never wraps and the statusline height never changes
-ROW_MAX=88
+ROW_MAX=${AGENTLINE_WIDTH:-128}
+GAP="  "
+SEP2="${DIM}   │   ${R}"
 row=""; width=2; shown=0; hidden=0
-while IFS=$'\t' read -r cpu rss secs label; do
+while IFS=$'\t' read -r cpu rss secs pid label; do
   [ -z "$label" ] && continue
   c=$(printf '%.0f' "$cpu")
   age=$([ "$secs" -lt 60 ] && echo "${secs}s" || fmt_secs "$secs")
   mem=$(fmt_kb "$rss")
-  plain="x ${label} ${c}% ${mem} ${age}"
-  need=${#plain}; [ -n "$row" ] && need=$((need + 5))
-  if [ $((width + need)) -gt $((ROW_MAX - 10)) ]; then hidden=$((hidden + 1)); continue; fi
+  # one cell per 20% of a core, capped at five
+  cells=$(( (c + 19) / 20 )); [ "$cells" -gt 5 ] && cells=5
+  bar=""
+  for ((i = 0; i < 5; i++)); do
+    if [ "$i" -lt "$cells" ]; then bar+="$(heat $(( (i + 1) * 20 )))▮"; else bar+="${DIM}▯${R}"; fi
+  done
+  plain="x ${label}${GAP}▮▮▮▮▮ ${c}%${GAP}${mem}${GAP}${age}${GAP}#${pid}"
+  need=${#plain}; [ -n "$row" ] && need=$((need + 7))
+  if [ $((width + need)) -gt $((ROW_MAX - 12)) ]; then hidden=$((hidden + 1)); continue; fi
   if [ "$c" -ge 5 ]; then mark="$(heat "$c")${spin[$(( (now + shown) % 10 ))]}${R}"; else mark="${DIM}·${R}"; fi
-  entry="$mark ${label} $(heat "$c")${c}%${R} ${DIM}${mem} ${age}${R}"
-  [ -z "$row" ] && row="$entry" || row+="${DIM}  ┊  ${R}$entry"
+  entry="$mark ${label}${GAP}${bar}${R} $(heat "$c")${c}%${R}${GAP}${mem}${GAP}${DIM}${age}${GAP}#${pid}${R}"
+  [ -z "$row" ] && row="$entry" || row+="$SEP2$entry"
   width=$((width + need)); shown=$((shown + 1))
 done <<<"$detail"
-[ "$hidden" -gt 0 ] && row+="${DIM}  ┊  +${hidden} more${R}"
+[ "$hidden" -gt 0 ] && row+="$SEP2${DIM}+${hidden} more${R}"
 [ -z "$row" ] && row="${DIM}· no session processes${R}"
 
 if [ "${AGENTLINE_ROWS:-2}" = 1 ]; then printf '%s' "$out"
