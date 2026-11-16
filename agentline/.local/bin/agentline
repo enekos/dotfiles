@@ -119,9 +119,9 @@ if [ -n "$ctx_pct" ]; then
   c=$(printf '%.0f' "$ctx_pct"); filled=$(( c / 10 )); [ "$filled" -gt 10 ] && filled=10
   bar=""
   for ((i = 0; i < 10; i++)); do
-    if [ "$i" -lt "$filled" ]; then bar+="$(heat $((i * 10 + 5)))▰"
-    elif [ "$i" -eq "$filled" ] && [ $((now % 2)) -eq 0 ]; then bar+="$(heat "$c")▱"
-    else bar+="${DIM}▱${R}"; fi
+    if [ "$i" -lt "$filled" ]; then bar+="$(heat $((i * 10 + 5)))━"
+    elif [ "$i" -eq "$filled" ] && [ $((now % 2)) -eq 0 ]; then bar+="$(heat "$c")━"
+    else bar+="${DIM}─${R}"; fi
   done
   ctx_str="${bar}${R} $(heat "$c")${c}%${R}"
 fi
@@ -158,6 +158,20 @@ add "$(limit wk "$week_pct" "$week_reset")"
 add "$load_str"
 add "$disk_str"
 add "$proc_str"
+
+# ── a fish swimming laps in a fixed-width pond, one step per second ──
+POND=14
+lap=$(( (POND - 3) * 2 )); pos=$(( now % lap ))
+if [ "$pos" -lt $((POND - 3)) ]; then fish="><>"; trail=$((pos - 2))
+else pos=$((lap - pos)); fish="<><"; trail=$((pos + 4)); fi
+pond=""
+for ((i = 0; i < POND; i++)); do
+  if [ "$i" -eq "$pos" ]; then pond+="$(rgb 255 170 90)${fish}"; i=$((i + 2))
+  elif [ "$i" -eq "$trail" ] && [ $((now % 3)) -ne 0 ]; then pond+="$(rgb 140 200 255)°"
+  elif [ $(( (i + now) % 4 )) -eq 0 ]; then pond+="$(rgb 60 110 160)~"
+  else pond+="$(rgb 60 110 160)·"; fi
+done
+add "${pond}${R}"
 # ── second row: one roomy entry per session process, busiest first ──
 fmt_kb() { awk -v k="$1" 'BEGIN{ if (k >= 1048576) printf "%.1fG", k/1048576; else printf "%.0fM", k/1024 }'; }
 spin=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
@@ -175,9 +189,9 @@ while IFS=$'\t' read -r cpu rss secs pid label; do
   cells=$(( (c + 19) / 20 )); [ "$cells" -gt 5 ] && cells=5
   bar=""
   for ((i = 0; i < 5; i++)); do
-    if [ "$i" -lt "$cells" ]; then bar+="$(heat $(( (i + 1) * 20 )))▮"; else bar+="${DIM}▯${R}"; fi
+    if [ "$i" -lt "$cells" ]; then bar+="$(heat $(( (i + 1) * 20 )))━"; else bar+="${DIM}─${R}"; fi
   done
-  plain="x ${label}${GAP}▮▮▮▮▮ ${c}%${GAP}${mem}${GAP}${age}${GAP}#${pid}"
+  plain="x ${label}${GAP}━━━━━ ${c}%${GAP}${mem}${GAP}${age}${GAP}#${pid}"
   need=${#plain}; [ -n "$row" ] && need=$((need + 7))
   if [ $((width + need)) -gt $((ROW_MAX - 12)) ]; then hidden=$((hidden + 1)); continue; fi
   if [ "$c" -ge 5 ]; then mark="$(heat "$c")${spin[$(( (now + shown) % 10 ))]}${R}"; else mark="${DIM}·${R}"; fi
