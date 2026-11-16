@@ -1,0 +1,182 @@
+#!/bin/bash
+# agentline — one animated statusline for every coding agent on this machine.
+#
+# stdin:  Claude Code's statusLine JSON. Every field is optional; other agents'
+#         adapters map what they have onto the same keys.
+# stdout: two rows, always two, so the host never jumps in height.
+#
+# AGENTLINE_PID   the agent process whose children are listed; otherwise the
+#                 nearest ancestor named claude, codex, opencode or odei
+# AGENTLINE_ROWS  1 to drop the process row, for hosts that only have one line
+export LC_NUMERIC=C
+input=$(cat)
+now=$(date +%s)
+
+IFS=$'\x1f' read -r session model effort dur_ms five_pct five_reset week_pct week_reset ctx_pct < <(
+  jq -r '[.session_id // "x", .model.display_name // "", .effort.level // "",
+          .cost.total_duration_ms // "", .rate_limits.five_hour.used_percentage // "",
+          .rate_limits.five_hour.resets_at // "", .rate_limits.seven_day.used_percentage // "",
+          .rate_limits.seven_day.resets_at // "", .context_window.used_percentage // ""] | map(tostring) | join("\u001f")' <<<"$input")
+
+R=$'\033[0m'; DIM=$'\033[2m'
+rgb() { printf '\033[38;2;%s;%s;%sm' "$1" "$2" "$3"; }
+SEP="${DIM} │ ${R}"
+
+# green → amber → red for a 0..100 value
+heat() {
+  local v=${1%.*}; [ -z "$v" ] && v=0
+  [ "$v" -gt 100 ] && v=100; [ "$v" -lt 0 ] && v=0
+  if [ "$v" -lt 50 ]; then rgb $((80 + v * 3)) 220 120
+  else rgb 235 $((220 - (v - 50) * 3)) $((120 - (v - 50) * 2)); fi
+}
+
+fmt_secs() {
+  local s=$1; [ "$s" -le 0 ] && { echo "0m"; return; }
+  local d=$((s / 86400)) h=$(((s % 86400) / 3600)) m=$(((s % 3600) / 60))
+  if [ "$d" -gt 0 ]; then echo "${d}d${h}h"; elif [ "$h" -gt 0 ]; then echo "${h}h${m}m"; else echo "${m}m"; fi
+}
+
+# ── session processes: descendants of the agent, minus the statusline itself ──
+# first line "nproc cpu", then one "cpu<TAB>rss_kb<TAB>secs<TAB>label" row per process
+procs=$(ps -axo pid=,ppid=,pcpu=,rss=,etime=,args= | awk -v me=$$ -v agent="${AGENTLINE_PID:-}" '
+  function secs(e,  d, n, f) {
+    d = 0; if (index(e, "-")) { split(e, f, "-"); d = f[1]; e = f[2] }
+    n = split(e, f, ":")
+    return d * 86400 + (n == 3 ? f[1] * 3600 + f[2] * 60 + f[3] : f[1] * 60 + f[2])
+  }
+  function base(x,  f, n) { n = split(x, f, "/"); x = f[n]; gsub(/[()]/, "", x); return x }
+  {
+    pid = $1; p[pid] = $2; cpu[pid] = $3; rss[pid] = $4; et[pid] = secs($5)
+    c[pid] = base($6); lbl = c[pid]
+    for (i = 7; i <= NF; i++) if ($i !~ /^-/) { lbl = lbl " " base($i); break }
+    l[pid] = substr(lbl, 1, 22); kids[$2] = kids[$2] " " pid
+  }
+  END {
+    x = me; skip = me
+    while (x > 1 && x != agent && c[x] !~ /^(claude|codex|opencode|odei)$/) { skip = x; x = p[x] }
+    if (x <= 1) { print "0 0"; exit }
+    q[1] = x; h = 1; t = 1; n = 0; s = 0; rows = ""
+    while (h <= t) {
+      split(kids[q[h++]], ks, " ")
+      for (i in ks) {
+        k = ks[i]; if (k == "" || k == skip || c[k] == "caffeinate") continue
+        q[++t] = k; n++; s += cpu[k]
+        # a shell that is only wrapping a child adds nothing to the detail row
+        if (c[k] ~ /^-?(zsh|bash|sh)$/ && kids[k] != "") continue
+        rows = rows sprintf("%s\t%s\t%s\t%s\n", cpu[k], rss[k], et[k], l[k])
+      }
+    }
+    printf "%d %.0f\n%s", n, s, rows
+  }')
+read -r nproc pcpu <<<"$(head -n1 <<<"$procs")"
+detail=$(tail -n +2 <<<"$procs" | sort -t$'\t' -k1,1nr)
+
+# ── system load: demand as % of all cores, trend from 1m vs 5m average ──
+ncpu=$(sysctl -n hw.ncpu)
+read -r load_pct trend < <(sysctl -n vm.loadavg | awk -v n="$ncpu" '{
+  one = $2; five = $3
+  t = one > five * 1.1 ? "↑" : (one < five * 0.9 ? "↓" : "→")
+  printf "%.0f %s\n", one / n * 100, t }')
+
+# ── animated activity indicator: spins while the session is busy, breathes when idle ──
+if [ "${pcpu:-0}" -ge 5 ]; then
+  frames=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
+  hue=$(( (now * 37) % 360 ))
+  # cheap hue wheel over a few anchors
+  case $(( hue / 60 )) in
+    0) col=$(rgb 255 140 90);; 1) col=$(rgb 255 200 90);; 2) col=$(rgb 130 230 140);;
+    3) col=$(rgb 90 200 255);; 4) col=$(rgb 160 140 255);; *) col=$(rgb 240 120 200);;
+  esac
+  indicator="${col}${frames[$((now % ${#frames[@]}))]}${R}"
+else
+  breathe=(70 110 160 210 160 110)
+  v=${breathe[$((now % 6))]}
+  indicator="$(rgb $((v - 20)) $v $((v + 40)))●${R}"
+fi
+
+# ── model name with a shimmer sweeping across it ──
+model_str=""
+if [ -n "$model" ]; then
+  len=${#model}; pos=$(( now % (len + 6) ))
+  for ((i = 0; i < len; i++)); do
+    d=$(( i - pos )); d=${d#-}
+    case $d in
+      0) model_str+="$(rgb 255 255 255)${model:i:1}";;
+      1) model_str+="$(rgb 230 190 160)${model:i:1}";;
+      *) model_str+="$(rgb 215 140 100)${model:i:1}";;
+    esac
+  done
+  model_str+="$R"
+  [ -n "$effort" ] && model_str+="${DIM}·${effort}${R}"
+fi
+
+# ── context bar: gradient fill, pulsing leading edge ──
+ctx_str=""
+if [ -n "$ctx_pct" ]; then
+  c=$(printf '%.0f' "$ctx_pct"); filled=$(( c / 10 )); [ "$filled" -gt 10 ] && filled=10
+  bar=""
+  for ((i = 0; i < 10; i++)); do
+    if [ "$i" -lt "$filled" ]; then bar+="$(heat $((i * 10 + 5)))▰"
+    elif [ "$i" -eq "$filled" ] && [ $((now % 2)) -eq 0 ]; then bar+="$(heat "$c")▱"
+    else bar+="${DIM}▱${R}"; fi
+  done
+  ctx_str="${bar}${R} $(heat "$c")${c}%${R}"
+fi
+
+limit() { # label pct reset
+  [ -z "$2" ] && return
+  local p; p=$(printf '%.0f' "$2")
+  local s="${DIM}$1${R} $(heat "$p")${p}%${R}"
+  [ -n "$3" ] && s+=" ${DIM}↻$(fmt_secs $(( $3 - now )))${R}"
+  printf '%s' "$s"
+}
+
+duration=""
+[ -n "$dur_ms" ] && duration="${DIM}⏱${R} $(fmt_secs $(( dur_ms / 1000 )))"
+
+load_str="${DIM}sys${R} $(heat "$load_pct")${load_pct}%${R} ${DIM}${trend}${R}"
+
+proc_str="${DIM}⚙${R} ${nproc}"
+[ "${pcpu:-0}" -gt 0 ] && proc_str+=" $(heat "$pcpu")${pcpu}%${R}"
+
+# ── free disk on the volume that holds $HOME (the data volume on APFS) ──
+read -r disk_used disk_free < <(df -k "$HOME" | awk 'NR == 2 {
+  u = $3 / ($3 + $4) * 100; f = $4 / 1048576
+  printf "%.0f %s\n", u, (f >= 100 ? sprintf("%.0fG", f) : sprintf("%.1fG", f)) }')
+disk_str="${DIM}disk${R} $(heat "$disk_used")${disk_free}${R} ${DIM}free${R}"
+
+out=""
+add() { [ -z "$1" ] && return; [ -z "$out" ] && out="$1" || out+="${SEP}$1"; }
+add "$indicator${model_str:+ $model_str}"
+add "$duration"
+add "$ctx_str"
+add "$(limit 5h "$five_pct" "$five_reset")"
+add "$(limit wk "$week_pct" "$week_reset")"
+add "$load_str"
+add "$disk_str"
+add "$proc_str"
+# ── second row: one entry per session process, busiest first ──
+fmt_kb() { awk -v k="$1" 'BEGIN{ if (k >= 1048576) printf "%.1fG", k/1048576; else printf "%.0fM", k/1024 }'; }
+spin=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
+# fixed visible budget so the row never wraps and the statusline height never changes
+ROW_MAX=88
+row=""; width=2; shown=0; hidden=0
+while IFS=$'\t' read -r cpu rss secs label; do
+  [ -z "$label" ] && continue
+  c=$(printf '%.0f' "$cpu")
+  age=$([ "$secs" -lt 60 ] && echo "${secs}s" || fmt_secs "$secs")
+  mem=$(fmt_kb "$rss")
+  plain="x ${label} ${c}% ${mem} ${age}"
+  need=${#plain}; [ -n "$row" ] && need=$((need + 5))
+  if [ $((width + need)) -gt $((ROW_MAX - 10)) ]; then hidden=$((hidden + 1)); continue; fi
+  if [ "$c" -ge 5 ]; then mark="$(heat "$c")${spin[$(( (now + shown) % 10 ))]}${R}"; else mark="${DIM}·${R}"; fi
+  entry="$mark ${label} $(heat "$c")${c}%${R} ${DIM}${mem} ${age}${R}"
+  [ -z "$row" ] && row="$entry" || row+="${DIM}  ┊  ${R}$entry"
+  width=$((width + need)); shown=$((shown + 1))
+done <<<"$detail"
+[ "$hidden" -gt 0 ] && row+="${DIM}  ┊  +${hidden} more${R}"
+[ -z "$row" ] && row="${DIM}· no session processes${R}"
+
+if [ "${AGENTLINE_ROWS:-2}" = 1 ]; then printf '%s' "$out"
+else printf '%s\n%s' "$out" "${DIM}↳${R} $row"; fi
+exit 0

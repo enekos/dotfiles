@@ -20,6 +20,9 @@ My personal dotfiles for macOS, managed cleanly with GNU Stow. This setup is hea
 - **Agent guardrails:** [Claude Code](https://claude.com/claude-code) hooks that stop the
   `cd x && y` anti-pattern, protect hand-written PR descriptions, and keep agents from
   commenting on GitHub or Linear — see [`claude/README.md`](claude/README.md).
+- **Agent statusline:** one animated statusline — model, context, rate limits, system load, free
+  disk and the session's own processes — shared by Claude Code, opencode, odei and (as far as it
+  allows) Codex — see [`agentline/README.md`](agentline/README.md).
 
 ---
 
@@ -75,6 +78,8 @@ stow ripgrep
 stow --adopt claude
 stow iterm2
 stow local
+stow agentline
+stow opencode
 ```
 
 After `stow iterm2`, run `./iterm2/install.sh` (with iTerm2 closed) to apply the "Evangelion Dark" preset as the Default profile.
