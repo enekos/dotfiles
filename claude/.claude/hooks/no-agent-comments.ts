@@ -214,7 +214,7 @@ const main = (): void => {
     return;
   }
 
-  if (tool.includes("linear") && LINEAR_COMMENT_TOOLS.has(tool.split("__").pop() ?? "")) {
+  if (tool.toLowerCase().includes("linear") && LINEAR_COMMENT_TOOLS.has(tool.split("__").pop() ?? "")) {
     if (overrideActive()) return;
     deny(LINEAR_REASON, LINEAR_NOTE);
   }

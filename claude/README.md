@@ -5,6 +5,11 @@
 handing it the pending tool call as JSON on stdin.
 
 - **Hooks:** `claude/.claude/hooks/` (stow → `~/.claude/hooks/`)
+- **Global instructions:** `claude/.claude/CLAUDE.md` (stow → `~/.claude/CLAUDE.md`)
+  — loaded into every session: prefer `zz` for directories and worktrees, read
+  the Rust style guide before touching Rust. Advice, not enforcement: the old
+  `enforce-zz` guard that denied `cd <dir> && …` is gone, because it blocked
+  legitimate one-off commands more often than it taught the habit.
 - **Runtime:** the guards are TypeScript run by [bun](https://bun.sh) — one
   language for anything that has to parse a command line, and a shebang so
   they stay executable on their own. `set-tab-title.py` is the exception: it
@@ -27,17 +32,9 @@ Two invariants every guard here keeps:
 
 | File | Event | What it stops |
 |---|---|---|
-| `enforce-zz.ts` | `PreToolUse(Bash)` | `cd <dir> && <cmd>` chains — rewrites them to `zz`, the zoxide jumper |
 | `protect-pr-body.ts` | `PreToolUse(Bash)` | Rewriting the body of an **open** PR (`gh pr edit --body`, `gh api PATCH /pulls/n`) |
 | `no-agent-comments.ts` | `PreToolUse(Bash, file writes, Linear MCP)` | Agent-written comments and reviews on GitHub and Linear |
 | `set-tab-title.py` | session + task events | Nothing — sets the iTerm2 tab title to the in-progress task |
-
-### `enforce-zz.ts`
-
-`cd /some/path && cmd` is disallowed on this machine; `zz <query> <cmd>` runs
-the command in the best zoxide match instead. The deny reason carries the
-exact rewrite (`zz data pnpm test`), because a guard that only says "use zz"
-gets answered with `git -C` and `--manifest-path` workarounds.
 
 ### `protect-pr-body.ts`
 
@@ -118,12 +115,11 @@ called by absolute path too — hooks do not inherit an interactive shell's
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "command": "/Users/you/.bun/bin/bun /Users/you/.claude/hooks/enforce-zz.ts" },
           { "type": "command", "command": "/Users/you/.bun/bin/bun /Users/you/.claude/hooks/protect-pr-body.ts" }
         ]
       },
       {
-        "matcher": "Bash|Write|Edit|NotebookEdit|mcp__linear-server__.*",
+        "matcher": "Bash|Write|Edit|NotebookEdit|mcp__linear-server__.*|mcp__claude_ai_Linear__.*",
         "hooks": [
           { "type": "command", "command": "/Users/you/.bun/bin/bun /Users/you/.claude/hooks/no-agent-comments.ts" }
         ]
