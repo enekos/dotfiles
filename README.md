@@ -146,6 +146,7 @@ stow -D zsh
 │   └── Brewfile         # Homebrew declarative package list
 ├── claude/
 │   ├── README.md         # What each hook blocks + settings.json wiring
+│   ├── .claude/CLAUDE.md # Global agent instructions (zz, Rust style guide)
 │   └── .claude/hooks/    # PreToolUse guards (bun) + iTerm2 tab title
 ├── git/
 │   ├── .gitconfig
